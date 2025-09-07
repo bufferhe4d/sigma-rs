@@ -12,33 +12,34 @@ fn test_composition_example() {
     // Composition and verification of proof for the following protocol :
     //
     // And(
-    //     Or( dleq, pedersen_commitment ),
-    //     Simple( discrete_logarithm ),
-    //     And( pedersen_commitment_dleq, bbs_blind_commitment_computation )
+    //     Or(dleq, pedersen_commitment),
+    //     Simple(discrete_logarithm),
+    //     And(pedersen_commitment_dleq, bbs_blind_commitment_computation)
     // )
     let domain_sep = b"hello world";
 
     // definitions of the underlying protocols
     let mut rng = rand::thread_rng();
-    let (relation1, witness1) = dleq(&mut rng);
-    let (relation2, witness2) = pedersen_commitment(&mut rng);
-    let (relation3, witness3) = discrete_logarithm(&mut rng);
-    let (relation4, witness4) = pedersen_commitment_dleq(&mut rng);
-    let (relation5, witness5) = bbs_blind_commitment(&mut rng);
+    let (instance1, witness1) = dleq::<G, _>(&mut rng);
+    let (instance2, witness2) = pedersen_commitment::<G, _>(&mut rng);
+    let (instance3, witness3) = discrete_logarithm::<G, _>(&mut rng);
+    let (instance4, witness4) = pedersen_commitment_dleq::<G, _>(&mut rng);
+    let (instance5, witness5) = bbs_blind_commitment::<G, _>(&mut rng);
 
     let wrong_witness2 = (0..witness2.len())
         .map(|_| <G as Group>::Scalar::random(&mut rng))
         .collect::<Vec<_>>();
     // second layer protocol definitions
-    let or_protocol1 = ComposedRelation::<G>::or([relation1, relation2]);
+    let or_protocol1 = ComposedRelation::or([instance1, instance2]);
     let or_witness1 = ComposedWitness::or([witness1, wrong_witness2]);
 
-    let and_protocol1 = ComposedRelation::and([relation4, relation5]);
+    let and_protocol1 = ComposedRelation::and([instance4, instance5]);
     let and_witness1 = ComposedWitness::and([witness4, witness5]);
 
     // definition of the final protocol
-    let instance = ComposedRelation::and([or_protocol1, relation3.into(), and_protocol1]);
-    let witness = ComposedWitness::and([or_witness1, witness3.into(), and_witness1]);
+    let instance =
+        ComposedRelation::and([or_protocol1, instance3.try_into(), and_protocol1]).unwrap();
+    let witness = ComposedWitness::and([or_witness1, witness3.try_into().unwrap(), and_witness1]);
 
     let nizk = instance.into_nizk(domain_sep);
 
@@ -67,13 +68,13 @@ fn test_or_one_true() {
         .map(|_| <G as Group>::Scalar::random(&mut rng))
         .collect::<Vec<_>>();
 
-    let or_protocol = ComposedRelation::or([relation1, relation2]);
+    let or_instance = ComposedRelation::or([relation1, relation2]).unwrap();
 
     // Construct two witnesses to the protocol, the first and then the second as the true branch.
     let witness_or_1 = ComposedWitness::or([witness1, wrong_witness2]);
     let witness_or_2 = ComposedWitness::or([wrong_witness1, witness2]);
 
-    let nizk = or_protocol.into_nizk(b"test_or_one_true");
+    let nizk = or_instance.into_nizk(b"test_or_one_true");
 
     for witness in [witness_or_1, witness_or_2] {
         // Batchable and compact proofs
@@ -95,7 +96,7 @@ fn test_or_both_true() {
     let (relation1, witness1) = dleq::<G, _>(&mut rng);
     let (relation2, witness2) = dleq::<G, _>(&mut rng);
 
-    let or_protocol = ComposedRelation::or([relation1, relation2]);
+    let or_protocol = ComposedRelation::or([relation1, relation2]).unwrap();
 
     let witness = ComposedWitness::or([witness1, witness2]);
     let nizk = or_protocol.into_nizk(b"test_or_both_true");

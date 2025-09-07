@@ -5,10 +5,9 @@ use curve25519_dalek::scalar::Scalar;
 use group::Group;
 use rand::rngs::OsRng;
 use sigma_rs::{
-    codec::Shake128DuplexSponge,
     composition::{ComposedRelation, ComposedWitness},
     errors::Error,
-    LinearRelation, Nizk,
+    LinearRelation,
 };
 
 type G = RistrettoPoint;
@@ -40,7 +39,7 @@ fn create_relation(P1: G, P2: G, Q: G, H: G) -> ComposedRelation<G> {
     rel2.set_element(Q_var, Q);
 
     // Compose into OR protocol
-    ComposedRelation::or([rel1.canonical().unwrap(), rel2.canonical().unwrap()])
+    ComposedRelation::or([rel1, rel2]).unwrap()
 }
 
 /// Prove knowledge of one of the witnesses (we know x2 for the DLEQ)
@@ -50,24 +49,22 @@ fn prove(P1: G, x2: Scalar, H: G) -> ProofResult<Vec<u8>> {
     let P2 = G::generator() * x2;
     let Q = H * x2;
 
-    let instance = create_relation(P1, P2, Q, H);
     // Create OR witness with branch 1 being the real one (index 1)
     let witness = ComposedWitness::Or(vec![
         ComposedWitness::Simple(vec![Scalar::from(0u64)]),
         ComposedWitness::Simple(vec![x2]),
     ]);
-    let nizk = Nizk::<_, Shake128DuplexSponge<G>>::new(b"or_proof_example", instance);
-
-    nizk.prove_batchable(&witness, &mut OsRng)
+    create_relation(P1, P2, Q, H)
+        .into_nizk(b"or_proof_example")
+        .prove_batchable(&witness, &mut OsRng)
 }
 
 /// Verify an OR proof given the public values
 #[allow(non_snake_case)]
 fn verify(P1: G, P2: G, Q: G, H: G, proof: &[u8]) -> ProofResult<()> {
-    let protocol = create_relation(P1, P2, Q, H);
-    let nizk = Nizk::<_, Shake128DuplexSponge<G>>::new(b"or_proof_example", protocol);
-
-    nizk.verify_batchable(proof)
+    create_relation(P1, P2, Q, H)
+        .into_nizk(b"or_proof_example")
+        .verify_batchable(proof)
 }
 
 #[allow(non_snake_case)]

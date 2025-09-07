@@ -48,13 +48,34 @@ pub enum ComposedRelation<G: PrimeGroup> {
 
 impl<G: PrimeGroup + ConstantTimeEq> ComposedRelation<G> {
     /// Create a [ComposedRelation] for an AND relation from the given list of relations.
-    pub fn and<T: Into<ComposedRelation<G>>>(witness: impl IntoIterator<Item = T>) -> Self {
-        Self::And(witness.into_iter().map(|x| x.into()).collect())
+    pub fn and<T>(instances: impl IntoIterator<Item = T>) -> Result<Self, InvalidInstance>
+    where
+        T: TryInto<ComposedRelation<G>>,
+        T::Error: Into<InvalidInstance>,
+    {
+        instances
+            .into_iter()
+            .map(|x| x.try_into().map_err(|e| e.into()))
+            .collect::<Result<Vec<ComposedRelation<G>>, _>>()
+            .map(Self::And)
     }
 
     /// Create a [ComposedRelation] for an OR relation from the given list of relations.
-    pub fn or<T: Into<ComposedRelation<G>>>(witness: impl IntoIterator<Item = T>) -> Self {
-        Self::Or(witness.into_iter().map(|x| x.into()).collect())
+    pub fn or<T>(instances: impl IntoIterator<Item = T>) -> Result<Self, InvalidInstance>
+    where
+        T: TryInto<ComposedRelation<G>>,
+        T::Error: Into<InvalidInstance>,
+    {
+        let composed_instances = instances
+            .into_iter()
+            .filter_map(|x| x.try_into().ok())
+            .collect::<Vec<_>>();
+
+        if composed_instances.is_empty() {
+            Err(InvalidInstance::new("All Instances are trivially false"))
+        } else {
+            Ok(Self::Or(composed_instances))
+        }
     }
 }
 
@@ -69,6 +90,14 @@ impl<G: PrimeGroup> TryFrom<LinearRelation<G>> for ComposedRelation<G> {
 
     fn try_from(value: LinearRelation<G>) -> Result<Self, Self::Error> {
         Ok(Self::Simple(CanonicalLinearRelation::try_from(value)?))
+    }
+}
+
+impl<G: PrimeGroup> TryFrom<Result<ComposedRelation<G>, InvalidInstance>> for ComposedRelation<G> {
+    type Error = InvalidInstance;
+
+    fn try_from(value: Result<ComposedRelation<G>, InvalidInstance>) -> Result<Self, Self::Error> {
+        value
     }
 }
 

@@ -8,6 +8,8 @@
 //! - Mismatched parameter lengths (e.g., during batch verification),
 //! - Access to unassigned group variables in constraint systems.
 
+use core::convert::Infallible;
+
 /// Represents an invalid instance error.
 #[derive(Debug, thiserror::Error)]
 #[error("Invalid instance: {message}")]
@@ -28,6 +30,13 @@ impl InvalidInstance {
 impl From<InvalidInstance> for Error {
     fn from(_err: InvalidInstance) -> Self {
         Error::InvalidInstanceWitnessPair
+    }
+}
+
+impl From<Infallible> for InvalidInstance {
+    fn from(_: Infallible) -> Self {
+        // This conversion is never actually called since Infallible can never be instantiated
+        unreachable!("Infallible can never be instantiated")
     }
 }
 
