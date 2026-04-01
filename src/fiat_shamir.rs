@@ -91,20 +91,23 @@ where
         Ok(transcript.narg_string().to_vec())
     }
 
-    /// Verifies a batchable non-interactive proof.
+    /// Deserializes a batchable non-interactive proof into its transcript components.
     ///
     /// # Parameters
-    /// - `proof`: A serialized batchable proof.
+    /// - `narg_string`: A serialized proof suitable for batch verification.
     ///
     /// # Returns
-    /// - `Ok(())` if the proof is valid.
-    /// - `Err(Error)` if deserialization or verification fails.
+    /// - `Ok((commitment, challenge, response))` if deserialization succeeds.
+    /// - `Err(Error)` if the proof is malformed or has trailing bytes.
     ///
     /// # Errors
     /// - Returns [`Error::VerificationFailure`] if:
-    ///   - The challenge doesn't match the recomputed one from the commitment.
-    ///   - The response fails verification under the Sigma protocol.
-    pub fn verify_batchable(&self, narg_string: &[u8]) -> Result<(), Error> {
+    ///   - Deserialization of any transcript component fails.
+    ///   - The proof contains unexpected trailing data.
+    pub(crate) fn deserialize_batchable(
+        &self,
+        narg_string: &[u8],
+    ) -> Result<crate::traits::Transcript<P>, Error> {
         let protocol_id = self.interactive_proof.protocol_identifier();
         let instance_label = self.interactive_proof.instance_label();
         let commitment_len = self.interactive_proof.commitment_len();
@@ -119,6 +122,24 @@ where
         let challenge = transcript.verifier_message::<P::Challenge>();
         let response = transcript.prover_messages_vec::<P::Response>(response_len)?;
         transcript.check_eof()?;
+        Ok((commitment, challenge, response))
+    }
+
+    /// Verifies a batchable non-interactive proof.
+    ///
+    /// # Parameters
+    /// - `proof`: A serialized batchable proof.
+    ///
+    /// # Returns
+    /// - `Ok(())` if the proof is valid.
+    /// - `Err(Error)` if deserialization or verification fails.
+    ///
+    /// # Errors
+    /// - Returns [`Error::VerificationFailure`] if:
+    ///   - The challenge doesn't match the recomputed one from the commitment.
+    ///   - The response fails verification under the Sigma protocol.
+    pub fn verify_batchable(&self, narg_string: &[u8]) -> Result<(), Error> {
+        let (commitment, challenge, response) = self.deserialize_batchable(narg_string)?;
         self.interactive_proof
             .verifier(&commitment, &challenge, &response)
     }
