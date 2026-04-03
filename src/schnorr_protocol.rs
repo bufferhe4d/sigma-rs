@@ -9,8 +9,8 @@ use crate::linear_relation::CanonicalLinearRelation;
 use crate::traits::{ScalarRng, SigmaProtocol, SigmaProtocolSimulator, Transcript};
 use crate::{LinearRelation, MultiScalarMul, Nizk};
 use alloc::vec::Vec;
-
 use group::prime::PrimeGroup;
+use sha3::digest::{ExtendableOutput, Update, XofReader};
 use spongefish::{Decoding, Encoding, NargDeserialize, NargSerialize};
 
 fn protocol_identifier_for_group<G>() -> [u8; 64] {
@@ -27,6 +27,27 @@ fn protocol_identifier_for_group<G>() -> [u8; 64] {
     }
 
     pad_identifier(b"ietf sigma proof linear relation")
+}
+
+fn derive_batch_challenge<G: PrimeGroup>(proofs: &[&[u8]]) -> G::Scalar
+where
+    G::Scalar: Decoding<[u8]>,
+{
+    const RATE: usize = 168;
+    const DOMAIN: &[u8] = b"verify-batch";
+
+    let mut initial_block = [0u8; RATE];
+    initial_block[..DOMAIN.len()].copy_from_slice(DOMAIN);
+
+    let mut shake = sha3::Shake128::default();
+    shake.update(&initial_block);
+    for proof in proofs {
+        shake.update(proof);
+    }
+
+    let mut repr = <G::Scalar as Decoding<[u8]>>::Repr::default();
+    shake.finalize_xof().read(repr.as_mut());
+    G::Scalar::decode(repr)
 }
 
 fn pad_identifier(identifier: &[u8]) -> [u8; 64] {
@@ -200,6 +221,62 @@ where
     /// ```
     pub fn into_nizk(self, session_identifier: &[u8]) -> Result<Nizk<CanonicalLinearRelation<G>>> {
         Ok(Nizk::new(session_identifier, self))
+    }
+
+    /// Batch-verifies multiple batchable proofs in a single multi-scalar multiplication.
+    ///
+    /// Proofs may come from different Nizks.
+    /// All verification equations are combined with powers of a random scalar mu.
+    /// mu is derived from the proof transcripts.
+    ///
+    /// # Parameters
+    /// - `proofs`: Pairs of `(nizk_instance, serialized_proof)`.
+    ///
+    /// # Returns
+    /// - `Ok(())` if all proofs are valid.
+    /// - `Err(Error)` if any proof is malformed or invalid.
+    pub fn verify_batch(proofs: &[(&Nizk<Self>, &[u8])]) -> Result<()> {
+        if proofs.is_empty() {
+            return Ok(());
+        }
+
+        let transcripts = proofs
+            .iter()
+            .map(|(nizk, p)| nizk.deserialize_batchable(p))
+            .collect::<Result<Vec<_>>>()?;
+
+        let proof_bytes: Vec<&[u8]> = proofs.iter().map(|(_, p)| *p).collect();
+        let mu = derive_batch_challenge::<G>(&proof_bytes);
+
+        let mut scalars = Vec::new();
+        let mut bases = Vec::new();
+        let mut power = mu;
+
+        for ((nizk, _), (commitment, challenge, response)) in proofs.iter().zip(&transcripts) {
+            let relation = &nizk.interactive_proof;
+
+            for (j, lc) in relation.linear_combinations.iter().enumerate() {
+                for (sv, gv) in lc {
+                    scalars.push(power * response[sv.index()]);
+                    bases.push(relation.group_elements.get(*gv).unwrap());
+                }
+
+                let image = relation.group_elements.get(relation.image[j]).unwrap();
+                scalars.push(-(power * *challenge));
+                bases.push(image);
+
+                scalars.push(-power);
+                bases.push(commitment[j]);
+
+                power *= mu;
+            }
+        }
+
+        if G::msm(&scalars, &bases) == G::identity() {
+            Ok(())
+        } else {
+            Err(Error::VerificationFailure)
+        }
     }
 }
 
